@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Play, Pause, RotateCcw, CheckCircle, Sparkles, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +14,9 @@ export const VoiceRecorder = ({
   const [hasRecorded, setHasRecorded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+  const finalTranscriptRef = useRef('');
 
   useEffect(() => {
     let interval;
@@ -25,49 +28,154 @@ export const VoiceRecorder = ({
     return () => clearInterval(interval);
   }, [isRecording]);
 
+  useEffect(() => {
+    // Initialize speech recognition
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
+
+      recognitionRef.current.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognitionRef.current.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        finalTranscriptRef.current += finalTranscript;
+        setTranscript(finalTranscriptRef.current + interimTranscript);
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const startRecording = () => {
-    setIsRecording(true);
-    setRecordingTime(0);
-    setTranscript('');
+  const startRecording = async () => {
+    try {
+      // Request microphone permission
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      setIsRecording(true);
+      setRecordingTime(0);
+      setTranscript('');
+      finalTranscriptRef.current = '';
+      
+      // Start speech recognition
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+      }
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      alert('Please allow microphone access to use voice recording.');
+    }
   };
 
   const stopRecording = () => {
     setIsRecording(false);
     setHasRecorded(true);
-    setTimeout(() => {
-      setTranscript("Hello, my name is John Doe. I am 35 years old. I live at 123 Main Street, New York, NY 10001. My phone number is 555-123-4567. I'm here for a medical consultation and would like to schedule an appointment...");
-    }, 1000);
+    
+    // Stop speech recognition
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
   };
 
   const processForm = () => {
     setIsProcessing(true);
+    
+    // Simple AI-like processing to extract information from transcript
     setTimeout(() => {
-      const mockFormData = {
-        name: 'John Doe',
-        age: '35',
-        address: '123 Main Street, New York, NY 10001',
-        phone: '555-123-4567',
-        email: 'john.doe@email.com',
-        ...(category === 'hospital' && {
-          medicalHistory: 'No major medical conditions',
-          emergencyContact: 'Jane Doe - 555-987-6543',
-          insuranceNumber: 'INS123456789'
-        }),
-        ...(category === 'job' && {
-          position: 'Software Developer',
-          experience: '5 years',
-          education: 'Bachelor of Computer Science'
-        })
-      };
-      onComplete(mockFormData);
+      const formData = extractDataFromTranscript(transcript);
+      onComplete(formData);
       setIsProcessing(false);
     }, 3000);
+  };
+
+  const extractDataFromTranscript = (text) => {
+    const lowercaseText = text.toLowerCase();
+    
+    // Extract name (look for "my name is" or "i am")
+    const nameMatch = text.match(/(?:my name is|i am|i'm)\s+([^.]{2,30})/i);
+    const name = nameMatch ? nameMatch[1].trim() : '';
+    
+    // Extract age (look for numbers followed by "years old" or standalone age)
+    const ageMatch = text.match(/(?:i am|i'm)\s+(\d{1,2})\s+(?:years old)?|(?:age|aged)\s+(\d{1,2})/i);
+    const age = ageMatch ? (ageMatch[1] || ageMatch[2]) : '';
+    
+    // Extract phone number
+    const phoneMatch = text.match(/(?:phone|number|contact).*?(\d{3}[-.\s]?\d{3}[-.\s]?\d{4})/i);
+    const phone = phoneMatch ? phoneMatch[1] : '';
+    
+    // Extract email
+    const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    const email = emailMatch ? emailMatch[1] : '';
+    
+    // Extract address (look for street addresses)
+    const addressMatch = text.match(/(?:live at|address is|located at)\s+([^.]{10,100})/i);
+    const address = addressMatch ? addressMatch[1].trim() : '';
+    
+    const baseData = {
+      name,
+      age,
+      phone,
+      email,
+      address,
+      fullTranscript: text
+    };
+    
+    // Add category-specific fields
+    if (category === 'hospital') {
+      const medicalMatch = text.match(/(?:medical history|conditions|allergies|medications).*?([^.]{10,200})/i);
+      return {
+        ...baseData,
+        medicalHistory: medicalMatch ? medicalMatch[1].trim() : '',
+        reason: text.includes('appointment') ? 'Medical consultation' : 'General inquiry'
+      };
+    }
+    
+    if (category === 'job') {
+      const experienceMatch = text.match(/(?:experience|worked|years).*?(\d+\s+years?)/i);
+      const positionMatch = text.match(/(?:applying for|position|job|role).*?([^.]{5,50})/i);
+      return {
+        ...baseData,
+        position: positionMatch ? positionMatch[1].trim() : '',
+        experience: experienceMatch ? experienceMatch[1] : ''
+      };
+    }
+    
+    return baseData;
   };
 
   const getCategoryPrompts = () => {
@@ -206,6 +314,7 @@ export const VoiceRecorder = ({
                       setHasRecorded(false);
                       setRecordingTime(0);
                       setTranscript('');
+                      finalTranscriptRef.current = '';
                     }}
                     variant="outline"
                     size="lg"
