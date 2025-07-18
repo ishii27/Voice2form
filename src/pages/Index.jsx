@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { VoiceRecorder } from '@/components/VoiceRecorder';
 import { FormPreview } from '@/components/FormPreview';
 import { FormCategories } from '@/components/FormCategories';
+import { CategoryDetails } from '@/components/CategoryDetails';
 
 const Index = () => {
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -14,7 +15,16 @@ const Index = () => {
 
   const handleCategorySelect = (category) => {
     setSelectedCategory(category);
+    setCurrentStep('details');
+  };
+
+  const handleProceedToRecording = () => {
     setCurrentStep('record');
+  };
+
+  const handleBackToCategories = () => {
+    setSelectedCategory(null);
+    setCurrentStep('category');
   };
 
   const handleRecordingComplete = (data) => {
@@ -135,6 +145,16 @@ const Index = () => {
           {currentStep === 'category' && (
             <div className="animate-fade-in">
               <FormCategories onCategorySelect={handleCategorySelect} />
+            </div>
+          )}
+          
+          {currentStep === 'details' && selectedCategory && (
+            <div className="animate-scale-in">
+              <CategoryDetails 
+                category={selectedCategory}
+                onProceed={handleProceedToRecording}
+                onBack={handleBackToCategories}
+              />
             </div>
           )}
           
